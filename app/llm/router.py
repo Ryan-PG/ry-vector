@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, Protocol
+from collections.abc import Iterator
+from typing import Protocol
 
 from app.config import Settings, get_settings
 from app.llm.ollama_client import OllamaChatClient
@@ -22,4 +23,3 @@ def get_chat_client(settings: Settings | None = None) -> ChatClient:
     if settings.llm_provider == "ollama":
         return OllamaChatClient(settings)
     raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
-

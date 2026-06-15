@@ -102,7 +102,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
-streamlit run app/main.py
+streamlit run streamlit_app.py
 ```
 
 For local non-Docker Ollama, set:
@@ -111,6 +111,25 @@ For local non-Docker Ollama, set:
 OLLAMA_BASE_URL=http://localhost:11434
 QDRANT_HOST=localhost
 ```
+
+### Qdrant Only With Docker
+
+For development, you can run only Qdrant in Docker and run the Streamlit app locally:
+
+```bash
+docker compose -f qdrant-only-docker-compose.yaml up -d
+```
+
+Then set the local app to connect to the exposed Qdrant port:
+
+```env
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+```
+
+Use `QDRANT_HOST=qdrant` only when the app also runs inside Docker Compose.
+
+If you see `ModuleNotFoundError: No module named 'app'` in local development, make sure you start Streamlit from the repository root with `streamlit run streamlit_app.py`.
 
 ## Environment Variables
 
@@ -163,4 +182,3 @@ Search and chat document filters are validated against SQLite ownership before Q
 - OpenAI mode requires `OPENAI_API_KEY` before uploading, searching, or chatting.
 - Ollama mode requires the configured chat and embedding models to be pulled into the Ollama container.
 - If you change embedding models after documents are indexed, use a new user account or clear the matching Qdrant collection, because vector dimensions must remain consistent per collection.
-

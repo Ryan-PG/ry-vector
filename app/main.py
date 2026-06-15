@@ -10,7 +10,7 @@ from app.auth.service import login_user, register_user
 from app.config import get_settings
 from app.db.database import init_db
 from app.db import repositories as repo
-from app.models.schemas import UserRecord
+from app.models.schemas import ChatSessionRecord, UserRecord
 from app.rag.chat import answer_question, stream_answer_question
 from app.rag.ingestion import delete_document, ingest_upload, supported_file_types
 from app.rag.retrieval import search_documents
@@ -22,7 +22,6 @@ st.set_page_config(page_title="Ry-Vector", layout="wide")
 def init_state() -> None:
     init_db()
     st.session_state.setdefault("user", None)
-    st.session_state.setdefault("page", "Dashboard")
     st.session_state.setdefault("active_chat_id", None)
 
 
@@ -48,7 +47,6 @@ def login_register_page() -> None:
             user = login_user(identifier, password)
             if user:
                 st.session_state["user"] = {"id": user.id, "username": user.username, "email": user.email}
-                st.session_state["page"] = "Dashboard"
                 st.rerun()
             st.error("Invalid username/email or password.")
 
@@ -72,7 +70,6 @@ def login_register_page() -> None:
                 try:
                     user = register_user(username, email, password)
                     st.session_state["user"] = {"id": user.id, "username": user.username, "email": user.email}
-                    st.session_state["page"] = "Dashboard"
                     st.rerun()
                 except sqlite3.IntegrityError:
                     st.error("Username or email already exists.")
@@ -82,9 +79,6 @@ def sidebar(user: UserRecord) -> None:
     with st.sidebar:
         st.subheader("Ry-Vector")
         st.caption(f"Signed in as {user.username}")
-        pages = ["Dashboard", "Upload Documents", "Search", "Chat", "Settings"]
-        selected = st.radio("Navigation", pages, index=pages.index(st.session_state.get("page", "Dashboard")))
-        st.session_state["page"] = selected
         if st.button("Logout", use_container_width=True):
             st.session_state.clear()
             st.rerun()
@@ -196,9 +190,31 @@ def ensure_chat_session(user: UserRecord, document_ids: list[int] | None) -> int
     return session.id
 
 
+def active_chat_session(sessions: list[ChatSessionRecord]) -> ChatSessionRecord | None:
+    session_id = st.session_state.get("active_chat_id")
+    for session in sessions:
+        if session.id == session_id:
+            return session
+    if sessions:
+        st.session_state["active_chat_id"] = sessions[0].id
+        return sessions[0]
+    st.session_state.pop("active_chat_id", None)
+    return None
+
+
+def activate_next_chat_session(sessions: list[ChatSessionRecord], deleted_session_id: int) -> None:
+    remaining = [session for session in sessions if session.id != deleted_session_id]
+    if remaining:
+        st.session_state["active_chat_id"] = remaining[0].id
+    else:
+        st.session_state.pop("active_chat_id", None)
+
+
 def chat_page(user: UserRecord) -> None:
     settings = get_settings()
     st.title("Chat")
+    sessions = repo.list_chat_sessions(user.id)
+    active_session = active_chat_session(sessions)
     left, right = st.columns([1, 2])
     with left:
         st.subheader("Sessions")
@@ -206,14 +222,22 @@ def chat_page(user: UserRecord) -> None:
             session = repo.create_chat_session(user.id, "New chat")
             st.session_state["active_chat_id"] = session.id
             st.rerun()
-        sessions = repo.list_chat_sessions(user.id)
+        if not sessions:
+            st.info("No chat history yet.")
         for session in sessions:
             label = f"{session.title} #{session.id}"
-            if st.button(label, key=f"session_{session.id}", use_container_width=True):
+            select_col, delete_col = st.columns([4, 1])
+            button_type = "primary" if active_session and active_session.id == session.id else "secondary"
+            if select_col.button(label, key=f"session_{session.id}", type=button_type, use_container_width=True):
                 st.session_state["active_chat_id"] = session.id
                 st.rerun()
-        if st.session_state.get("active_chat_id"):
-            export = repo.export_chat_session(st.session_state["active_chat_id"], user.id)
+            if delete_col.button("Delete", key=f"delete_session_{session.id}", use_container_width=True):
+                repo.delete_chat_session(session.id, user.id)
+                activate_next_chat_session(sessions, session.id)
+                st.success("Chat history deleted.")
+                st.rerun()
+        if active_session:
+            export = repo.export_chat_session(active_session.id, user.id)
             export_data = {
                 "session": asdict(export["session"]),
                 "messages": [asdict(message) for message in export["messages"]],
@@ -221,7 +245,7 @@ def chat_page(user: UserRecord) -> None:
             st.download_button(
                 "Export JSON",
                 data=json.dumps(export_data, indent=2),
-                file_name=f"chat_{st.session_state['active_chat_id']}.json",
+                file_name=f"chat_{active_session.id}.json",
                 mime="application/json",
                 use_container_width=True,
             )
@@ -229,17 +253,21 @@ def chat_page(user: UserRecord) -> None:
     with right:
         top_k = st.slider("Retrieval top K", 1, 20, settings.top_k_default)
         document_ids = selected_document_ids(user, "chat_doc_filter")
-        session_id = ensure_chat_session(user, document_ids)
-        messages = repo.list_chat_messages(session_id, user.id)
-        for message in messages:
-            with st.chat_message(message.role):
-                st.write(message.content)
-                if message.citations:
-                    with st.expander("Citations"):
-                        st.json(json.loads(message.citations))
+        if active_session:
+            messages = repo.list_chat_messages(active_session.id, user.id)
+            for message in messages:
+                with st.chat_message(message.role):
+                    st.write(message.content)
+                    if message.citations:
+                        with st.expander("Citations"):
+                            st.json(json.loads(message.citations))
+        else:
+            st.info("Start a new chat or ask a question to create one.")
 
         prompt = st.chat_input("Ask about your documents")
         if prompt:
+            session_id = active_session.id if active_session else ensure_chat_session(user, document_ids)
+            repo.update_chat_session_scope(session_id, user.id, document_ids)
             repo.add_chat_message(session_id, user.id, "user", prompt)
             with st.chat_message("user"):
                 st.write(prompt)
@@ -309,16 +337,18 @@ def main() -> None:
         return
 
     sidebar(user)
-    page = st.session_state.get("page", "Dashboard")
-    if page == "Dashboard":
+    dashboard_tab, upload_tab, search_tab, chat_tab, settings_tab = st.tabs(
+        ["Dashboard", "Upload Documents", "Search", "Chat", "Settings"]
+    )
+    with dashboard_tab:
         dashboard_page(user)
-    elif page == "Upload Documents":
+    with upload_tab:
         upload_page(user)
-    elif page == "Search":
+    with search_tab:
         search_page(user)
-    elif page == "Chat":
+    with chat_tab:
         chat_page(user)
-    elif page == "Settings":
+    with settings_tab:
         settings_page(user)
 
 
