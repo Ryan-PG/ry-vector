@@ -26,12 +26,13 @@ services:
     image: ollama/ollama:0.2.8
     ports:
       - "11434:11434"
+    environment:
+      OLLAMA_MODELS: /root/.ollama/models
     volumes:
-      - ollama_models:/root/.ollama
+      - ${OLLAMA_MODELS_PATH:-ollama_models}:/root/.ollama/models
     restart: unless-stopped
 
 volumes:
   qdrant_storage:
   sqlite_data:
   ollama_models:
-

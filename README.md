@@ -67,7 +67,7 @@ OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 3. Start the stack from the repository root:
 
 ```bash
-docker compose up --build
+docker compose --env-file .env.docker up --build
 ```
 
 4. Open Streamlit:
@@ -80,14 +80,28 @@ http://localhost:8501
 
 ## Ollama Model Setup
 
-The compose file includes an Ollama service. After the containers are running, pull the models you configured:
+The compose file includes an Ollama service. By default, Ollama stores models in the Docker named volume `ollama_models`.
+
+If you already have Ollama models on your host machine, set `OLLAMA_MODELS_PATH` in `.env.docker` to your local Ollama `models` directory before starting Docker Compose. Docker mounts that host directory into the Ollama container at `/root/.ollama/models`.
+
+```env
+OLLAMA_MODELS_PATH=C:/Users/your-user/.ollama/models
+```
+
+Then start Docker Compose with `.env.docker` so the model path is used for the volume mount:
+
+```bash
+docker compose --env-file .env.docker up --build
+```
+
+If you use the default Docker volume and the models are not present yet, pull the models you configured after the containers are running:
 
 ```bash
 docker compose exec ollama ollama pull llama3
 docker compose exec ollama ollama pull nomic-embed-text
 ```
 
-Then use `LLM_PROVIDER=ollama` in `.env` and restart the app container:
+Then use `LLM_PROVIDER=ollama` in `.env.docker` and restart the app container:
 
 ```bash
 docker compose restart app
@@ -144,6 +158,7 @@ EMBEDDING_MODEL=text-embedding-3-small
 OLLAMA_BASE_URL=http://ollama:11434
 OLLAMA_CHAT_MODEL=llama3
 OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+OLLAMA_MODELS_PATH=ollama_models
 CHUNK_SIZE=800
 CHUNK_OVERLAP=120
 TOP_K_DEFAULT=5
@@ -160,7 +175,7 @@ Docker volumes:
 
 - `sqlite_data`: SQLite database and uploaded files under `/app/data`.
 - `qdrant_storage`: Qdrant vector data.
-- `ollama_models`: Ollama model cache.
+- `ollama_models`: Ollama model cache when `OLLAMA_MODELS_PATH=ollama_models`; otherwise Ollama uses the host model directory configured in `.env.docker`.
 
 SQLite tables are created automatically on app startup:
 
