@@ -120,6 +120,8 @@ For development, you can run only Qdrant in Docker and run the Streamlit app loc
 docker compose -f qdrant-only-docker-compose.yaml up -d
 ```
 
+For changes to this development-only Qdrant Docker Compose setup, edit `qdrant-only-docker-compose.yaml` instead of the other Compose files.
+
 Then set the local app to connect to the exposed Qdrant port:
 
 ```env
