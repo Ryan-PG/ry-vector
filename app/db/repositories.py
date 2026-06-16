@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+import hashlib
 import json
+import secrets
 from typing import Any, Iterable
 
 from passlib.context import CryptContext
@@ -16,6 +19,15 @@ from app.utils.files import now_utc_iso
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+AUTH_SESSION_DAYS = 30
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _hash_auth_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def hash_password(password: str) -> str:
@@ -111,6 +123,54 @@ def authenticate_user(identifier: str, password: str) -> UserRecord | None:
     if not user:
         return None
     return user if verify_password(password, user.password_hash) else None
+
+
+def create_auth_session(user_id: int) -> str:
+    token = secrets.token_urlsafe(32)
+    created_at = _utc_now_iso()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=AUTH_SESSION_DAYS)).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO auth_sessions (token_hash, user_id, created_at, last_used_at, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (_hash_auth_token(token), user_id, created_at, created_at, expires_at),
+        )
+    return token
+
+
+def get_user_by_auth_token(token: str) -> UserRecord | None:
+    token = token.strip()
+    if not token:
+        return None
+    token_hash = _hash_auth_token(token)
+    now = _utc_now_iso()
+    with get_connection() as conn:
+        conn.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (now,))
+        row = conn.execute(
+            """
+            SELECT users.*
+            FROM auth_sessions
+            JOIN users ON users.id = auth_sessions.user_id
+            WHERE auth_sessions.token_hash = ? AND auth_sessions.expires_at > ?
+            """,
+            (token_hash, now),
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            "UPDATE auth_sessions SET last_used_at = ? WHERE token_hash = ?",
+            (now, token_hash),
+        )
+        return _row_to_user(row)
+
+
+def delete_auth_session(token: str | None) -> None:
+    if not token:
+        return
+    with get_connection() as conn:
+        conn.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (_hash_auth_token(token.strip()),))
 
 
 def list_documents(user_id: int, include_deleted: bool = False) -> list[DocumentRecord]:

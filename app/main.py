@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from http.cookies import SimpleCookie
 import json
 import sqlite3
 
 import streamlit as st
+import streamlit.components.v1 as components
+
+try:
+    from streamlit.web.server.websocket_headers import _get_websocket_headers
+except ImportError:  # pragma: no cover - Streamlit internal fallback.
+    _get_websocket_headers = None
 
 from app.auth.service import login_user, register_user
 from app.config import get_settings
@@ -19,21 +26,88 @@ from app.rag.retrieval import search_documents
 st.set_page_config(page_title="Ry-Vector", layout="wide")
 
 
+AUTH_COOKIE_NAME = "ry_vector_auth_token"
+AUTH_COOKIE_MAX_AGE = repo.AUTH_SESSION_DAYS * 24 * 60 * 60
+
+
+def session_user(user: UserRecord) -> dict[str, str | int]:
+    return {"id": user.id, "username": user.username, "email": user.email}
+
+
+def render_auth_cookie_script(token: str | None) -> None:
+    if token:
+        cookie_js = (
+            f"document.cookie = {json.dumps(AUTH_COOKIE_NAME)} + '=' + "
+            f"encodeURIComponent({json.dumps(token)}) + "
+            f"'; Max-Age={AUTH_COOKIE_MAX_AGE}; Path=/; SameSite=Lax';"
+        )
+    else:
+        cookie_js = (
+            f"document.cookie = {json.dumps(AUTH_COOKIE_NAME)} + "
+            "'=; Max-Age=0; Path=/; SameSite=Lax';"
+        )
+    components.html(f"<script>{cookie_js}</script>", height=0, width=0)
+
+
+def request_auth_token() -> str | None:
+    if _get_websocket_headers is None:
+        return None
+    try:
+        headers = _get_websocket_headers() or {}
+    except Exception:
+        return None
+    cookie_header = headers.get("Cookie") or headers.get("cookie")
+    if not cookie_header:
+        return None
+    cookies = SimpleCookie()
+    try:
+        cookies.load(cookie_header)
+    except Exception:
+        return None
+    morsel = cookies.get(AUTH_COOKIE_NAME)
+    return morsel.value if morsel else None
+
+
 def init_state() -> None:
     init_db()
     st.session_state.setdefault("user", None)
+    st.session_state.setdefault("auth_token", None)
+    st.session_state.setdefault("auth_cookie_needs_write", False)
     st.session_state.setdefault("active_chat_id", None)
+
+
+def start_authenticated_session(user: UserRecord) -> UserRecord:
+    token = repo.create_auth_session(user.id)
+    st.session_state["user"] = session_user(user)
+    st.session_state["auth_token"] = token
+    st.session_state["auth_cookie_needs_write"] = True
+    return user
 
 
 def current_user() -> UserRecord | None:
     user = st.session_state.get("user")
     if not user:
-        return None
+        token = request_auth_token()
+        if not token:
+            return None
+        fresh = repo.get_user_by_auth_token(token)
+        if not fresh:
+            render_auth_cookie_script(None)
+            return None
+        st.session_state["user"] = session_user(fresh)
+        st.session_state["auth_token"] = token
+        return fresh
     fresh = repo.get_user_by_id(user["id"])
+    if not fresh:
+        token = st.session_state.get("auth_token") or request_auth_token()
+        repo.delete_auth_session(token)
+        st.session_state["user"] = None
+        st.session_state["auth_token"] = None
+        render_auth_cookie_script(None)
     return fresh
 
 
-def login_register_page() -> None:
+def login_register_page() -> UserRecord | None:
     st.title("Ry-Vector")
     st.caption("Private multi-user RAG over your own documents.")
     tab_login, tab_register = st.tabs(["Login", "Register"])
@@ -46,8 +120,7 @@ def login_register_page() -> None:
         if submitted:
             user = login_user(identifier, password)
             if user:
-                st.session_state["user"] = {"id": user.id, "username": user.username, "email": user.email}
-                st.rerun()
+                return start_authenticated_session(user)
             st.error("Invalid username/email or password.")
 
     with tab_register:
@@ -69,19 +142,23 @@ def login_register_page() -> None:
             else:
                 try:
                     user = register_user(username, email, password)
-                    st.session_state["user"] = {"id": user.id, "username": user.username, "email": user.email}
-                    st.rerun()
+                    return start_authenticated_session(user)
                 except sqlite3.IntegrityError:
                     st.error("Username or email already exists.")
+    return None
 
 
-def sidebar(user: UserRecord) -> None:
+def sidebar(user: UserRecord) -> bool:
     with st.sidebar:
         st.subheader("Ry-Vector")
         st.caption(f"Signed in as {user.username}")
         if st.button("Logout", use_container_width=True):
+            token = st.session_state.get("auth_token") or request_auth_token()
+            repo.delete_auth_session(token)
             st.session_state.clear()
-            st.rerun()
+            render_auth_cookie_script(None)
+            return True
+    return False
 
 
 def dashboard_page(user: UserRecord) -> None:
@@ -226,7 +303,7 @@ def chat_page(user: UserRecord) -> None:
             st.info("No chat history yet.")
         for session in sessions:
             label = f"{session.title} #{session.id}"
-            select_col, delete_col = st.columns([4, 1])
+            select_col, delete_col = st.columns([2, 2])
             button_type = "primary" if active_session and active_session.id == session.id else "secondary"
             if select_col.button(label, key=f"session_{session.id}", type=button_type, use_container_width=True):
                 st.session_state["active_chat_id"] = session.id
@@ -333,10 +410,22 @@ def main() -> None:
     init_state()
     user = current_user()
     if not user:
-        login_register_page()
-        return
+        auth_placeholder = st.empty()
+        with auth_placeholder.container():
+            user = login_register_page()
+        if not user:
+            return
+        auth_placeholder.empty()
 
-    sidebar(user)
+    if st.session_state.get("auth_cookie_needs_write"):
+        render_auth_cookie_script(st.session_state.get("auth_token"))
+        st.session_state["auth_cookie_needs_write"] = False
+
+    if sidebar(user):
+        auth_placeholder = st.empty()
+        with auth_placeholder.container():
+            login_register_page()
+        return
     dashboard_tab, upload_tab, search_tab, chat_tab, settings_tab = st.tabs(
         ["Dashboard", "Upload Documents", "Search", "Chat", "Settings"]
     )
