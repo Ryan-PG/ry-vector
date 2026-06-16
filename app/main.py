@@ -100,7 +100,7 @@ def dashboard_page(user: UserRecord) -> None:
         return
     for document in documents[:8]:
         with st.container(border=True):
-            left, right = st.columns([4, 1])
+            left, right = st.columns([2, 2])
             left.markdown(f"**{document.original_filename}**")
             left.caption(f"Status: {document.status} | Chunks: {document.chunk_count} | Uploaded: {document.created_at}")
             if document.preview_text:
