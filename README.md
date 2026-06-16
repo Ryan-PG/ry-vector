@@ -6,11 +6,13 @@ Users can register, upload documents, embed chunks into isolated per-user Qdrant
 
 ## App Demo Gallery
 
-| **Dashboard** | **Upload & Process Docs** | **Semantic Search** |
-| :---: | :---: | :---: |
-| <img src="assets/Dashboard.png" alt="Dashboard" width="700" > | <img src="assets/Upload.Process.Docs.png" alt="Upload and process documents" width="700" > | <img src="assets/Semantic.Search.png" alt="Semantic search" width="700" > |
-| **Chat** | **Settings** | **Login & Register** |
-| <img src="assets/Chat.png" alt="Chat" width="700" > | <img src="assets/Settings.png" alt="Settings" width="700" > | <img src="assets/Login.Register.png" alt="Login and register" width="700" > |
+| **Dashboard** | **Upload & Process Docs** |
+| :---: | :---: |
+| <img src="assets/Dashboard.png" alt="Dashboard" width="500" > | <img src="assets/Upload.Process.Docs.png" alt="Upload and process documents" width="500" > |
+| **Semantic Search** | **Chat** |
+| <img src="assets/Semantic.Search.png" alt="Semantic search" width="500" > | <img src="assets/Chat.png" alt="Chat" width="500" > |
+| **Settings** | **Login & Register** |
+| <img src="assets/Settings.png" alt="Settings" width="500" > | <img src="assets/Login.Register.png" alt="Login and register" width="500" > |
 
 ## Features
 
