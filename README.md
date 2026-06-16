@@ -4,6 +4,14 @@ Ry-Vector is a multi-user RAG application built with Streamlit, SQLite, Qdrant, 
 
 Users can register, upload documents, embed chunks into isolated per-user Qdrant collections, search with dynamic top-K retrieval, and chat with citations over their own documents.
 
+## App Demo Gallery
+
+| **Dashboard** | **Upload & Process Docs** | **Semantic Search** |
+| :---: | :---: | :---: |
+| <img src="assets/Dashboard.png" alt="Dashboard" width="700" > | <img src="assets/Upload.Process.Docs.png" alt="Upload and process documents" width="700" > | <img src="assets/Semantic.Search.png" alt="Semantic search" width="700" > |
+| **Chat** | **Settings** | **Login & Register** |
+| <img src="assets/Chat.png" alt="Chat" width="700" > | <img src="assets/Settings.png" alt="Settings" width="700" > | <img src="assets/Login.Register.png" alt="Login and register" width="700" > |
+
 ## Features
 
 - Register, login, logout with bcrypt password hashing.
